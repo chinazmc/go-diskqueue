@@ -59,37 +59,54 @@ type diskQueue struct {
 	// 64bit atomic vars need to be first for proper alignment on 32bit platforms
 
 	// run-time state (also persisted to disk)
-	readPos      int64
-	writePos     int64
-	readFileNum  int64
+	//读取数据的位置
+	readPos int64
+	// 写入数据的位置
+	writePos int64
+	// 读取文件的编号
+	readFileNum int64
+	// 写入文件的编号
 	writeFileNum int64
-	depth        int64
+	// 未处理的消息总数
+	depth int64
 
 	sync.RWMutex
 
 	// instantiation time metadata
-	name                string
-	dataPath            string
-	maxBytesPerFile     int64 // cannot change once created
+	name     string
+	dataPath string
+	// 每个文件的大小限制
+	maxBytesPerFile int64 // cannot change once created
+
 	maxBytesPerFileRead int64
-	minMsgSize          int32
-	maxMsgSize          int32
-	syncEvery           int64         // number of writes per fsync
-	syncTimeout         time.Duration // duration of time per fsync
-	exitFlag            int32
-	needSync            bool
+	// 每条消息的最小大小限制
+	minMsgSize int32
+	// 每条消息的最大大小限制
+	maxMsgSize int32
+	// 缓存消息有多少条后进行写入
+	syncEvery int64 // number of writes per fsync
+	// 自动写入消息文件的时间间隔
+	syncTimeout time.Duration // duration of time per fsync
+	exitFlag    int32
+	needSync    bool
 
 	// keeps track of the position where we have read
 	// (but not yet sent over readChan)
-	nextReadPos     int64
+	// 下一条消息的位置
+	nextReadPos int64
+	// 下一条消息的文件编号
 	nextReadFileNum int64
-
-	readFile  *os.File
+	// 读取的文件
+	readFile *os.File
+	// 写入的文件
 	writeFile *os.File
-	reader    *bufio.Reader
-	writeBuf  bytes.Buffer
+	// 读取的buffer
+	reader *bufio.Reader
+	// 写入的buffer
+	writeBuf bytes.Buffer
 
 	// exposed via ReadChan()
+	// 读取数据的channel
 	readChan chan []byte
 
 	// exposed via PeekChan()
@@ -368,12 +385,13 @@ func (d *diskQueue) writeOne(data []byte) error {
 	var err error
 
 	dataLen := int32(len(data))
+	// 计算写入位置，消息数量加1
 	totalBytes := int64(4 + dataLen)
-
+	// 判断消息的长度是否合法
 	if dataLen < d.minMsgSize || dataLen > d.maxMsgSize {
 		return fmt.Errorf("invalid message write size (%d) minMsgSize=%d maxMsgSize=%d", dataLen, d.minMsgSize, d.maxMsgSize)
 	}
-
+	// 如果写入位置大于 单个文件的最大限制， 则持久化文件到硬盘
 	// will not wrap-around if maxBytesPerFile + maxMsgSize < Int64Max
 	if d.writePos > 0 && d.writePos+totalBytes > d.maxBytesPerFile {
 		if d.readFileNum == d.writeFileNum {
@@ -414,6 +432,7 @@ func (d *diskQueue) writeOne(data []byte) error {
 	}
 
 	d.writeBuf.Reset()
+	// 写入4字节的消息长度,以大端序保存
 	err = binary.Write(&d.writeBuf, binary.BigEndian, dataLen)
 	if err != nil {
 		return err
@@ -425,6 +444,7 @@ func (d *diskQueue) writeOne(data []byte) error {
 	}
 
 	// only write to the file once
+	// 写入到文件
 	_, err = d.writeFile.Write(d.writeBuf.Bytes())
 	if err != nil {
 		d.writeFile.Close()
@@ -469,7 +489,7 @@ func (d *diskQueue) retrieveMetaData() error {
 		return err
 	}
 	defer f.Close()
-
+	// 读取数据并赋值
 	var depth int64
 	_, err = fmt.Fscanf(f, "%d\n%d,%d\n%d,%d\n",
 		&depth,
